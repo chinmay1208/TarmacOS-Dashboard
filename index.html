@@ -214,7 +214,7 @@
     <div class="panel">
       <div class="panel-head">
         <h2>Events, last two minutes</h2>
-        <span class="sub mono" id="chart-sub">per 3.5s tick</span>
+        <span class="sub mono" id="chart-sub">one event every 1–2 min</span>
       </div>
       <canvas id="chart" width="640" height="148"></canvas>
       <div class="chart-key">
@@ -266,6 +266,8 @@
     { type: "Near miss", sev: "crit" },
   ];
   const WEIGHTS = [0.42, 0.28, 0.14, 0.10, 0.06];
+  const MIN_EVENT_GAP = 60 * 1000;
+  const MAX_EVENT_GAP = 120 * 1000;
 
   let role = "admin";
   let logCount = 0;
@@ -377,35 +379,40 @@
     while (incidentsEl.children.length > 6) incidentsEl.removeChild(incidentsEl.lastChild);
   }
 
+  function scheduleNextEvent() {
+    const delay = Math.floor(
+      MIN_EVENT_GAP + Math.random() * (MAX_EVENT_GAP - MIN_EVENT_GAP)
+    );
+    setTimeout(tick, delay);
+  }
+
   function tick() {
     const bucket = { telemetry: 0, critical: 0 };
-    const n = Math.random() < 0.35 ? 2 : 1;
-    for (let i = 0; i < n; i++) {
-      const ev = pick(EVENTS, WEIGHTS);
-      const vehicle = pick(VEHICLES);
-      const zone = zoneFor(vehicle);
-      bucket.telemetry++;
-      const lvl = ev.sev === 'crit' ? 'crit' : ev.sev === 'warn' ? 'warn' : 'info';
-      addLog(ev.type + ' — ' + vehicle + ' @ ' + zone, lvl);
+    const ev = pick(EVENTS, WEIGHTS);
+    const vehicle = pick(VEHICLES);
+    const zone = zoneFor(vehicle);
+    bucket.telemetry++;
+    const lvl = ev.sev === 'crit' ? 'crit' : ev.sev === 'warn' ? 'warn' : 'info';
+    addLog(ev.type + ' — ' + vehicle + ' @ ' + zone, lvl);
 
-      if (ev.sev === 'crit' || ev.sev === 'warn') {
-        bucket.critical++;
-        counters[vehicle]++;
-        if (ev.sev === 'crit') {
-          pushIncident(vehicle, ev.type, zone, 'crit');
-          addLog('FFmpeg: 20s clip sliced for ' + vehicle + ' → S3 upload complete', 'ok');
-        }
-        if (counters[vehicle] >= 3) {
-          addLog('Redis threshold hit: ' + vehicle + '_hard_stops = 3 → POST /cmms/ticket (IBM Maximo)', 'warn');
-          addLog('Maintenance ticket dispatched for ' + vehicle, 'ok');
-          counters[vehicle] = 0;
-        }
+    if (ev.sev === 'crit' || ev.sev === 'warn') {
+      bucket.critical++;
+      counters[vehicle]++;
+      if (ev.sev === 'crit') {
+        pushIncident(vehicle, ev.type, zone, 'crit');
+        addLog('FFmpeg: 20s clip sliced for ' + vehicle + ' → S3 upload complete', 'ok');
+      }
+      if (counters[vehicle] >= 3) {
+        addLog('Redis threshold hit: ' + vehicle + '_hard_stops = 3 → POST /cmms/ticket (IBM Maximo)', 'warn');
+        addLog('Maintenance ticket dispatched for ' + vehicle, 'ok');
+        counters[vehicle] = 0;
       }
     }
     history.push(bucket);
     if (history.length > MAX_POINTS) history.shift();
     drawChart();
     renderFleet();
+    scheduleNextEvent();
   }
 
   function setRole(r) {
@@ -439,7 +446,7 @@
   renderFleet();
   drawChart();
   addLog('System online — MQTT broker connected, awaiting tarmac events', 'info');
-  setInterval(tick, 3500);
+  scheduleNextEvent();
 })();
 </script>
 </body>
